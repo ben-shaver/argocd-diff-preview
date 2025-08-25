@@ -5,11 +5,11 @@ metadata:
 webhooks:
   - name: example-validate.example.com
     clientConfig:
-      caBundle: "BASE64CERT_WILL_BE_DIFFERENT"
+      caBundle: "SDFSDGhidfg845234lksdgf08w3j09fFWERTWERT"
     rules:
       - apiGroups: ["*"]
         apiVersions: ["*"]
-        operations: ["CREATE", "UPDATE"]
+        operations: ["CREATE", "UPDATE", "LIST"]
         resources: ["deployments"]
 
 
