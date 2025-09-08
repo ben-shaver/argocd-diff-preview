@@ -10,6 +10,6 @@ spec:
     namespace: default
   source:
     repoURL: https://github.com/ben-shaver/argocd-diff-preview
-    path: examples/app-of-apps/level-2
+    path: examples/multi-level-app-of-apps/level-2
     targetRevision: HEAD
 
