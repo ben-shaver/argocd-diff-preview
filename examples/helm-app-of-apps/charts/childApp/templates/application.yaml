@@ -9,7 +9,7 @@ spec:
     name: in-cluster
     namespace: default
   source:
-    repoURL: https://github.com/dag-andersen/argocd-diff-preview
+    repoURL: https://github.com/ben-shaver/argocd-diff-preview
     path: examples/helm-app-of-apps/resources
     targetRevision: HEAD
 
