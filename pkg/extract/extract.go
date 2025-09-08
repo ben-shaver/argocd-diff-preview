@@ -95,7 +95,145 @@ func GetResourcesFromBothBranches(
 	}
 	log.Debug().Msg("Extracted manifests for both branches")
 
+	// Recursively process nested Applications discovered in manifests
+	childBase, childTarget, err := expandNestedApplications(argocd, timeout, prefix, deleteAfterProcessing, extractedBaseApps, extractedTargetApps)
+	if err != nil {
+		return nil, nil, time.Since(startTime), fmt.Errorf("failed to expand nested applications: %w", err)
+	}
+
+	// Append discovered nested apps to the results
+	if len(childBase) > 0 {
+		extractedBaseApps = append(extractedBaseApps, childBase...)
+	}
+	if len(childTarget) > 0 {
+		extractedTargetApps = append(extractedTargetApps, childTarget...)
+	}
+
 	return extractedBaseApps, extractedTargetApps, time.Since(startTime), nil
+}
+
+// expandNestedApplications discovers nested Argo CD Applications in already extracted manifests
+// and renders them as well, recursively up to a safe depth.
+func expandNestedApplications(
+    argocd *argocdPkg.ArgoCDInstallation,
+    timeout uint64,
+    prefix string,
+    deleteAfterProcessing bool,
+    extractedBaseApps []ExtractedApp,
+    extractedTargetApps []ExtractedApp,
+) ([]ExtractedApp, []ExtractedApp, error) {
+    const maxDepth = 6
+
+    // Track which app ids per branch we've already rendered to avoid loops
+    visited := make(map[string]bool)
+
+    for _, a := range extractedBaseApps {
+        visited[keyForVisited(a.Id, git.Base)] = true
+    }
+    for _, a := range extractedTargetApps {
+        visited[keyForVisited(a.Id, git.Target)] = true
+    }
+
+    // Accumulate newly extracted apps from nested levels
+    var allNewBase []ExtractedApp
+    var allNewTarget []ExtractedApp
+
+    // Seed children from current extracted manifests (with loop detection)
+    baseChildren, baseLoop := findChildApplicationsFromExtractedDetectLoop(extractedBaseApps, git.Base, visited)
+    targetChildren, targetLoop := findChildApplicationsFromExtractedDetectLoop(extractedTargetApps, git.Target, visited)
+    if baseLoop || targetLoop {
+        log.Warn().Msg("Detected nested Application loop during initial discovery; stopping nested processing and proceeding with current results")
+        return allNewBase, allNewTarget, nil
+    }
+
+    depth := 0
+    for (len(baseChildren) > 0 || len(targetChildren) > 0) && depth < maxDepth {
+        depth++
+
+        // Combine children for processing
+        var toProcess []argoapplication.ArgoResource
+        toProcess = append(toProcess, baseChildren...)
+        toProcess = append(toProcess, targetChildren...)
+
+        // Render these child apps
+        newBase, newTarget, err := getResourcesFromApps(argocd, toProcess, timeout, prefix, deleteAfterProcessing)
+        if err != nil {
+            return nil, nil, err
+        }
+
+        // Record and accumulate
+        for _, a := range newBase {
+            if !visited[keyForVisited(a.Id, git.Base)] {
+                visited[keyForVisited(a.Id, git.Base)] = true
+                allNewBase = append(allNewBase, a)
+            }
+        }
+        for _, a := range newTarget {
+            if !visited[keyForVisited(a.Id, git.Target)] {
+                visited[keyForVisited(a.Id, git.Target)] = true
+                allNewTarget = append(allNewTarget, a)
+            }
+        }
+
+        // Discover next layer (with loop detection)
+        var loop bool
+        baseChildren, loop = findChildApplicationsFromExtractedDetectLoop(newBase, git.Base, visited)
+        if loop {
+            log.Warn().Msg("Detected nested Application loop; stopping nested processing and proceeding with current results")
+            break
+        }
+        targetChildren, loop = findChildApplicationsFromExtractedDetectLoop(newTarget, git.Target, visited)
+        if loop {
+            log.Warn().Msg("Detected nested Application loop; stopping nested processing and proceeding with current results")
+            break
+        }
+    }
+
+    if depth >= maxDepth && (len(baseChildren) > 0 || len(targetChildren) > 0) {
+        log.Warn().Msgf("Reached max nested Application depth (%d). Some nested apps may be skipped.", maxDepth)
+    }
+
+    return allNewBase, allNewTarget, nil
+}
+
+func keyForVisited(id string, branch git.BranchType) string {
+    return id + "|" + string(branch)
+}
+
+// findChildApplicationsFromExtracted finds Argo CD Applications within extracted manifests and returns them as ArgoResources
+func findChildApplicationsFromExtracted(list []ExtractedApp, branch git.BranchType, visited map[string]bool) []argoapplication.ArgoResource {
+    children, _ := findChildApplicationsFromExtractedDetectLoop(list, branch, visited)
+    return children
+}
+
+// findChildApplicationsFromExtractedDetectLoop returns children and a bool indicating a loop was detected
+func findChildApplicationsFromExtractedDetectLoop(list []ExtractedApp, branch git.BranchType, visited map[string]bool) ([]argoapplication.ArgoResource, bool) {
+    var children []argoapplication.ArgoResource
+    for _, ea := range list {
+        // Scan each manifest for Argo CD Application
+        for _, obj := range ea.Manifest {
+            if strings.TrimSpace(obj.GetKind()) != "Application" {
+                continue
+            }
+            apiVersion := obj.GetAPIVersion()
+            if apiVersion == "" || !strings.Contains(strings.ToLower(apiVersion), "argoproj.io/") {
+                continue
+            }
+            name := obj.GetName()
+            if strings.TrimSpace(name) == "" {
+                continue
+            }
+            if visited[keyForVisited(name, branch)] {
+                // Loop detected: already processed application referenced again as a child
+                log.Warn().Str("app", name).Str("branch", string(branch)).Msg("Nested Application loop detected")
+                return nil, true
+            }
+            copy := obj.DeepCopy()
+            child := argoapplication.NewArgoResource(copy, argoapplication.Application, name, name, "embedded", branch)
+            children = append(children, *child)
+        }
+    }
+    return children, false
 }
 
 func verifyNoDuplicateAppIds(apps []argoapplication.ArgoResource) error {

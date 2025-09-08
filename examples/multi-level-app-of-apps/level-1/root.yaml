@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps-root
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    name: in-cluster
+    namespace: default
+  source:
+    repoURL: https://github.com/dag-andersen/argocd-diff-preview
+    path: examples/app-of-apps/level-2
+    targetRevision: HEAD
+
