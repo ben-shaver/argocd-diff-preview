@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helm-leaf
+  labels:
+    app: helm-leaf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helm-leaf
+  template:
+    metadata:
+      labels:
+        app: helm-leaf
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25.5
+          ports:
+            - containerPort: 80
+

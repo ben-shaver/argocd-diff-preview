@@ -1,0 +1,7 @@
+apiVersion: v2
+name: rootApp
+description: Root Helm chart that renders an Argo CD Application pointing to childApp chart
+type: application
+version: 0.1.0
+appVersion: "1.0"
+
