@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: helm-child-app
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    name: in-cluster
+    namespace: default
+  source:
+    repoURL: https://github.com/ben-shaver/argocd-diff-preview
+    path: examples/helm-app-of-apps/charts/childApp
+    targetRevision: HEAD
+    helm: {}
